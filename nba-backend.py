@@ -1,95 +1,126 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 CORS(app)
 
-# BalldontLie API - Free NBA data
-BALLDONTLIE_API = "https://api.balldontlie.io/v1"
-API_KEY = "26f12344-8c22-4525-8bd4-d8007b942926"
+# ESPN API - Free, no auth needed
+ESPN_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 
 @app.route('/api/games', methods=['GET'])
 def get_games():
-    """Get today's NBA games from BalldontLie API"""
+    """Get NBA games - today's games or recent games if none today"""
     try:
-        # Get today's date
-        today = datetime.now().strftime('%Y-%m-%d')
+        all_games = []
+        dates_to_check = []
         
-        # Fetch games from BalldontLie
-        url = f"{BALLDONTLIE_API}/games?dates[]={today}"
-        headers = {'Authorization': API_KEY}
+        # Check today, yesterday, and 2 days ago
+        for days_ago in range(0, 3):
+            date = datetime.now() - timedelta(days=days_ago)
+            dates_to_check.append(date)
         
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
-        
-        games = []
-        for game in data.get('data', []):
-            # Determine status
-            status = 'Final' if game['status'] == 'Final' else 'Live' if game['status'] else 'Scheduled'
+        # Try each date until we find games
+        for date in dates_to_check:
+            date_str = date.strftime('%Y%m%d')
+            url = f"{ESPN_API}?dates={date_str}"
             
-            games.append({
-                'id': str(game['id']),
-                'status': status,
-                'home': game['home_team']['full_name'],
-                'away': game['visitor_team']['full_name'],
-                'homeScore': game['home_team_score'] if game['home_team_score'] else 0,
-                'awayScore': game['visitor_team_score'] if game['visitor_team_score'] else 0,
-                'time': today
-            })
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            games_found = []
+            for event in data.get('events', []):
+                competition = event['competitions'][0]
+                home_team = competition['competitors'][0]
+                away_team = competition['competitors'][1]
+                
+                # Determine status
+                status_type = competition['status']['type']['name']
+                if status_type == 'STATUS_FINAL':
+                    status = 'Final'
+                elif status_type == 'STATUS_IN_PROGRESS':
+                    status = 'Live'
+                else:
+                    status = 'Scheduled'
+                
+                games_found.append({
+                    'id': event['id'],
+                    'status': status,
+                    'home': home_team['team']['displayName'],
+                    'away': away_team['team']['displayName'],
+                    'homeScore': int(home_team.get('score', 0)),
+                    'awayScore': int(away_team.get('score', 0)),
+                    'time': date.strftime('%B %d, %Y')
+                })
+            
+            # If we found games, use them
+            if games_found:
+                all_games = games_found
+                break
         
-        return jsonify({
-            'success': True,
-            'date': today,
-            'games': games if games else get_fallback_games()
-        })
+        # If still no games (e.g., All-Star break), return message
+        if not all_games:
+            all_games = [{
+                'id': '0',
+                'status': 'Info',
+                'home': 'No Recent Games',
+                'away': 'All-Star Break',
+                'homeScore': 0,
+                'awayScore': 0,
+                'time': 'Check back after Feb 20th'
+            }]
         
-    except Exception as e:
-        print(f"Error fetching games: {e}")
         return jsonify({
             'success': True,
             'date': datetime.now().strftime('%Y-%m-%d'),
-            'games': get_fallback_games()
+            'games': all_games
         })
-
-def get_fallback_games():
-    """Sample games in case API fails"""
-    return [
-        {
-            'id': '1',
-            'status': 'Final',
-            'home': 'Los Angeles Lakers',
-            'away': 'Golden State Warriors',
-            'homeScore': 118,
-            'awayScore': 112,
-            'time': 'Today'
-        }
-    ]
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.route('/api/game/<game_id>/stats', methods=['GET'])
 def get_game_stats(game_id):
-    """Get game stats from BalldontLie"""
+    """Get game stats from ESPN"""
     try:
-        url = f"{BALLDONTLIE_API}/stats?game_ids[]={game_id}&per_page=100"
-        headers = {'Authorization': API_KEY}
-        
-        response = requests.get(url, headers=headers, timeout=10)
+        url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event={game_id}"
+        response = requests.get(url, timeout=10)
         data = response.json()
         
-        # Get all players and sort by points
-        players = data.get('data', [])
-        players.sort(key=lambda x: x.get('pts', 0), reverse=True)
-        
         top_performers = []
-        for player in players[:4]:
-            top_performers.append({
-                'name': player['player']['first_name'] + ' ' + player['player']['last_name'],
-                'team': player['team']['abbreviation'],
-                'points': player.get('pts', 0),
-                'rebounds': player.get('reb', 0),
-                'assists': player.get('ast', 0)
-            })
+        
+        # Get top players from boxscore
+        if 'boxscore' in data and 'players' in data['boxscore']:
+            all_players = []
+            
+            for team in data['boxscore']['players']:
+                for player_group in team['statistics']:
+                    for player in player_group.get('athletes', []):
+                        stats = player.get('stats', [])
+                        if len(stats) >= 3:
+                            try:
+                                points = int(stats[0]) if stats[0] and stats[0] != '--' else 0
+                                rebounds = int(stats[1]) if stats[1] and stats[1] != '--' else 0
+                                assists = int(stats[2]) if stats[2] and stats[2] != '--' else 0
+                                
+                                all_players.append({
+                                    'name': player['athlete']['displayName'],
+                                    'team': team['team']['abbreviation'],
+                                    'points': points,
+                                    'rebounds': rebounds,
+                                    'assists': assists
+                                })
+                            except (ValueError, TypeError):
+                                continue
+            
+            # Sort by points and get top 4
+            all_players.sort(key=lambda x: x['points'], reverse=True)
+            top_performers = all_players[:4]
         
         return jsonify({
             'success': True,
@@ -97,11 +128,8 @@ def get_game_stats(game_id):
         })
         
     except Exception as e:
-        print(f"Error fetching stats: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        })
+        print(f"Stats error: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/health', methods=['GET'])
 def health():
