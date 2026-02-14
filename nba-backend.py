@@ -86,7 +86,7 @@ def get_games():
 
 @app.route('/api/game/<game_id>/stats', methods=['GET'])
 def get_game_stats(game_id):
-    """Get game stats from ESPN"""
+    """Get game stats using ESPN's key mapping"""
     try:
         url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event={game_id}"
         response = requests.get(url, timeout=10)
@@ -94,80 +94,63 @@ def get_game_stats(game_id):
         
         top_performers = []
         
-        # Try to get leaders first (simpler and more reliable)
-        if 'leaders' in data:
-            for leader_category in data['leaders']:
-                for leader in leader_category.get('leaders', []):
-                    athlete = leader.get('athlete', {})
-                    if athlete:
-                        # Get stats from display value
-                        display_value = leader.get('displayValue', '0')
-                        value = float(display_value.split()[0]) if display_value else 0
-                        
-                        name = athlete.get('displayName', 'Unknown')
-                        team = athlete.get('team', {}).get('abbreviation', 'N/A')
-                        
-                        # Check if we already have this player
-                        existing = next((p for p in top_performers if p['name'] == name), None)
-                        if not existing:
-                            top_performers.append({
-                                'name': name,
-                                'team': team,
-                                'points': 0,
-                                'rebounds': 0,
-                                'assists': 0
-                            })
-                            existing = top_performers[-1]
-                        
-                        # Update the relevant stat
-                        category = leader_category.get('name', '').lower()
-                        if 'point' in category:
-                            existing['points'] = int(value)
-                        elif 'rebound' in category:
-                            existing['rebounds'] = int(value)
-                        elif 'assist' in category:
-                            existing['assists'] = int(value)
-        
-        # If leaders didn't work, try boxscore
-        if not top_performers and 'boxscore' in data and 'players' in data['boxscore']:
+        if 'boxscore' in data and 'players' in data['boxscore']:
             all_players = []
             
-            for team in data['boxscore']['players']:
-                team_abbr = team['team']['abbreviation']
+            for team_data in data['boxscore']['players']:
+                team_abbr = team_data.get('team', {}).get('abbreviation', 'N/A')
                 
-                for stat_group in team.get('statistics', []):
-                    if stat_group.get('name') != 'starters':
-                        continue
-                        
-                    for player in stat_group.get('athletes', []):
+                for stat_group in team_data.get('statistics', []):
+                    # Get the keys to know which position each stat is in
+                    keys = stat_group.get('keys', [])
+                    
+                    # Find positions of stats we care about
+                    pts_idx = next((i for i, k in enumerate(keys) if 'points' in k.lower()), None)
+                    reb_idx = next((i for i, k in enumerate(keys) if k.lower() == 'rebounds'), None)
+                    ast_idx = next((i for i, k in enumerate(keys) if 'assists' in k.lower()), None)
+                    
+                    for athlete in stat_group.get('athletes', []):
                         try:
-                            name = player['athlete']['displayName']
-                            stats = player.get('stats', [])
+                            name = athlete.get('athlete', {}).get('displayName', '')
+                            stats = athlete.get('stats', [])
                             
-                            if len(stats) >= 15:  # ESPN has many stat columns
-                                # Common positions: PTS, REB, AST
-                                points = int(stats[14]) if stats[14] and stats[14] != '--' else 0
-                                rebounds = int(stats[11]) if stats[11] and stats[11] != '--' else 0
-                                assists = int(stats[12]) if stats[12] and stats[12] != '--' else 0
-                                
-                                if points > 0:  # Only include players who scored
-                                    all_players.append({
-                                        'name': name,
-                                        'team': team_abbr,
-                                        'points': points,
-                                        'rebounds': rebounds,
-                                        'assists': assists
-                                    })
-                        except (ValueError, TypeError, IndexError):
+                            # Extract stats using the key positions
+                            points = 0
+                            rebounds = 0
+                            assists = 0
+                            
+                            if pts_idx is not None and pts_idx < len(stats):
+                                try:
+                                    points = int(stats[pts_idx]) if stats[pts_idx] and stats[pts_idx] != '--' else 0
+                                except:
+                                    pass
+                            
+                            if reb_idx is not None and reb_idx < len(stats):
+                                try:
+                                    rebounds = int(stats[reb_idx]) if stats[reb_idx] and stats[reb_idx] != '--' else 0
+                                except:
+                                    pass
+                            
+                            if ast_idx is not None and ast_idx < len(stats):
+                                try:
+                                    assists = int(stats[ast_idx]) if stats[ast_idx] and stats[ast_idx] != '--' else 0
+                                except:
+                                    pass
+                            
+                            if points > 0:  # Only include players who scored
+                                all_players.append({
+                                    'name': name,
+                                    'team': team_abbr,
+                                    'points': points,
+                                    'rebounds': rebounds,
+                                    'assists': assists
+                                })
+                        except Exception as e:
                             continue
             
             # Sort by points and get top 4
             all_players.sort(key=lambda x: x['points'], reverse=True)
             top_performers = all_players[:4]
-        
-        # If still no performers, return empty (game might not have stats yet)
-        if not top_performers:
-            top_performers = []
         
         return jsonify({
             'success': True,
@@ -176,8 +159,11 @@ def get_game_stats(game_id):
         
     except Exception as e:
         print(f"Stats error: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
+        return jsonify({
+            'success': True,
+            'topPerformers': []
+        })
+        
 @app.route('/api/news', methods=['GET'])
 def get_news():
     """Get NBA news from ESPN RSS feed"""
