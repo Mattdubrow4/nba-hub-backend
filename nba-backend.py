@@ -196,12 +196,21 @@ def get_news():
             except:
                 time_ago = 'Recently'
             
-            news_items.append({
-                'type': news_type,
-                'headline': headline,
-                'details': description[:200] + '...' if len(description) > 200 else description,
-                'time': time_ago
-            })
+            # Get article links
+links = article.get('links', {})
+web_link = ''
+if 'web' in links and 'href' in links['web']:
+    web_link = links['web']['href']
+elif 'api' in links and 'web' in links['api']:
+    web_link = links['api']['web'].get('href', '')
+
+news_items.append({
+    'type': news_type,
+    'headline': headline,
+    'details': description[:200] + '...' if len(description) > 200 else description,
+    'time': time_ago,
+    'link': web_link if web_link else 'https://www.espn.com/nba/'
+})
         
         return jsonify({
             'success': True,
