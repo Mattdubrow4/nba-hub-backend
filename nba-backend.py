@@ -288,15 +288,20 @@ def get_social():
             else:
                 comments_str = str(comments)
             
-            posts.append({
-                'platform': '🔴',  # Reddit icon
-                'user': f'r/NBA',
-                'handle': f'u/{author}',
-                'avatar': '🏀',
-                'content': title,
-                'likes': score_str,
-                'retweets': comments_str
-            })
+# Get Reddit post link
+permalink = post.get('permalink', '')
+full_link = f"https://www.reddit.com{permalink}" if permalink else 'https://www.reddit.com/r/nba'
+
+posts.append({
+    'platform': '🔴',  # Reddit icon
+    'user': f'r/NBA',
+    'handle': f'u/{author}',
+    'avatar': '🏀',
+    'content': title,
+    'likes': score_str,
+    'retweets': comments_str,
+    'link': full_link
+})
             
             if len(posts) >= 10:
                 break
