@@ -197,20 +197,20 @@ def get_news():
                 time_ago = 'Recently'
             
             # Get article links
-links = article.get('links', {})
-web_link = ''
-if 'web' in links and 'href' in links['web']:
-    web_link = links['web']['href']
-elif 'api' in links and 'web' in links['api']:
-    web_link = links['api']['web'].get('href', '')
-
-news_items.append({
-    'type': news_type,
-    'headline': headline,
-    'details': description[:200] + '...' if len(description) > 200 else description,
-    'time': time_ago,
-    'link': web_link if web_link else 'https://www.espn.com/nba/'
-})
+            links = article.get('links', {})
+            web_link = ''
+            if 'web' in links and 'href' in links['web']:
+                web_link = links['web']['href']
+            elif 'api' in links and 'web' in links['api']:
+                web_link = links['api']['web'].get('href', '')
+            
+            news_items.append({
+                'type': news_type,
+                'headline': headline,
+                'details': description[:200] + '...' if len(description) > 200 else description,
+                'time': time_ago,
+                'link': web_link if web_link else 'https://www.espn.com/nba/'
+            })
         
         return jsonify({
             'success': True,
@@ -227,13 +227,15 @@ news_items.append({
                     'type': 'news',
                     'headline': 'NBA All-Star Weekend in Progress',
                     'details': 'The league\'s best players showcase their skills in Indianapolis.',
-                    'time': 'Today'
+                    'time': 'Today',
+                    'link': 'https://www.espn.com/nba/'
                 },
                 {
                     'type': 'news',
                     'headline': 'Regular Season Resumes February 20th',
                     'details': 'Teams return from All-Star break ready for playoff push.',
-                    'time': '1 hour ago'
+                    'time': '1 hour ago',
+                    'link': 'https://www.espn.com/nba/'
                 }
             ]
         })
