@@ -14,44 +14,61 @@ ESPN_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 # ========================================
 @app.route('/api/games', methods=['GET'])
 def get_games():
-    """Get recent NBA games"""
+    """Get NBA games - prioritize today's live games"""
     try:
         all_games = []
-        for days_ago in range(0, 3):
-            date = datetime.now() - timedelta(days=days_ago)
+        
+        # Check TODAY first (most important)
+        today = datetime.now()
+        
+        # Try today, yesterday, and day before
+        dates_to_check = [
+            today,                          # Today - LIVE games
+            today - timedelta(days=1),      # Yesterday - recent finals
+            today - timedelta(days=2)       # 2 days ago - recent finals
+        ]
+        
+        for date in dates_to_check:
             date_str = date.strftime('%Y%m%d')
             url = f"{ESPN_API}/scoreboard?dates={date_str}"
             
-            response = requests.get(url, timeout=10)
-            data = response.json()
-            
-            for event in data.get('events', []):
-                comp = event['competitions'][0]
-                home = comp['competitors'][0]
-                away = comp['competitors'][1]
+            try:
+                response = requests.get(url, timeout=10)
+                data = response.json()
                 
-                status_type = comp['status']['type']['name']
-                if status_type == 'STATUS_FINAL':
-                    status = 'Final'
-                elif status_type == 'STATUS_IN_PROGRESS':
-                    status = 'Live'
-                else:
-                    status = 'Scheduled'
+                for event in data.get('events', []):
+                    comp = event['competitions'][0]
+                    home = comp['competitors'][0]
+                    away = comp['competitors'][1]
+                    
+                    status_type = comp['status']['type']['name']
+                    if status_type == 'STATUS_FINAL':
+                        status = 'Final'
+                    elif status_type == 'STATUS_IN_PROGRESS':
+                        status = 'Live'
+                    else:
+                        status = 'Scheduled'
+                    
+                    all_games.append({
+                        'id': event['id'],
+                        'status': status,
+                        'home': home['team']['displayName'],
+                        'away': away['team']['displayName'],
+                        'homeScore': int(home.get('score', 0)),
+                        'awayScore': int(away.get('score', 0)),
+                        'time': date.strftime('%B %d, %Y')
+                    })
                 
-                all_games.append({
-                    'id': event['id'],
-                    'status': status,
-                    'home': home['team']['displayName'],
-                    'away': away['team']['displayName'],
-                    'homeScore': int(home.get('score', 0)),
-                    'awayScore': int(away.get('score', 0)),
-                    'time': date.strftime('%B %d, %Y')
-                })
-            
-            if all_games:
-                break
+                # If we found live or final games, stop searching older dates
+                if all_games and any(g['status'] in ['Live', 'Final'] for g in all_games):
+                    break
+                    
+            except Exception as e:
+                print(f"Error fetching date {date_str}: {e}")
+                continue
         
-        return jsonify({'success': True, 'games': all_games if all_games else []})
+        return jsonify({'success': True, 'games': all_games})
+        
     except Exception as e:
         print(f"Games error: {e}")
         return jsonify({'success': False, 'error': str(e)})
