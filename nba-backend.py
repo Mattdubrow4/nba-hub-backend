@@ -14,18 +14,16 @@ ESPN_API = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 # ========================================
 @app.route('/api/games', methods=['GET'])
 def get_games():
-    """Get NBA games - prioritize today's live games"""
+    """Get today's NBA games only"""
     try:
         all_games = []
         
-        # Check TODAY first (most important)
+        # Only check today and yesterday
         today = datetime.now()
         
-        # Try today, yesterday, and day before
         dates_to_check = [
             today,                          # Today - LIVE games
-            today - timedelta(days=1),      # Yesterday - recent finals
-            today - timedelta(days=2)       # 2 days ago - recent finals
+            today - timedelta(days=1)       # Yesterday - recent finals
         ]
         
         for date in dates_to_check:
@@ -42,12 +40,15 @@ def get_games():
                     away = comp['competitors'][1]
                     
                     status_type = comp['status']['type']['name']
+                    
+                    # Only include live and final games
                     if status_type == 'STATUS_FINAL':
                         status = 'Final'
                     elif status_type == 'STATUS_IN_PROGRESS':
                         status = 'Live'
                     else:
-                        status = 'Scheduled'
+                        # Skip scheduled games for tomorrow
+                        continue
                     
                     all_games.append({
                         'id': event['id'],
@@ -59,13 +60,12 @@ def get_games():
                         'time': date.strftime('%B %d, %Y')
                     })
                 
-                # If we found live or final games, stop searching older dates
-                if all_games and any(g['status'] in ['Live', 'Final'] for g in all_games):
-                    break
-                    
             except Exception as e:
                 print(f"Error fetching date {date_str}: {e}")
                 continue
+        
+        # Sort by status - Live games first, then Final games
+        all_games.sort(key=lambda x: (0 if x['status'] == 'Live' else 1))
         
         return jsonify({'success': True, 'games': all_games})
         
